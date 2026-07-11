@@ -1,0 +1,29 @@
+# Local agent/tool state
+.agents/
+.claude/
+.codex/
+.codex-stash/
+.specify/
+.tmp/
+src/.agents/
+src/.claude/
+src/.codex/
+src/.codex-stash/
+src/.specify/
+src/.tmp/
+
+# Gradle
+.gradle/
+src/.gradle/
+**/build/
+
+# IDE/compiler output
+**/bin/
+.idea/
+.vscode/
+*.class
+
+# Generated document/render scratch output
+src/docs/rendered_architecture_doc/
+src/docs/tmp*/
+src/*.md
