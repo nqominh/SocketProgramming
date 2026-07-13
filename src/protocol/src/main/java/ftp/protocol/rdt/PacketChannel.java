@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 
-public interface PacketEndpoint extends AutoCloseable {
+public interface PacketChannel extends AutoCloseable {
     void send(byte[] datagram) throws IOException;
 
     byte[] receive(Duration timeout) throws IOException, TimeoutException;

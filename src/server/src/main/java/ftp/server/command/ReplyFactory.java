@@ -57,6 +57,7 @@ public final class ReplyFactory {
     public static ControlMessage noDataConnection() {
         return ControlMessage.reply(425, "No data connection");
     }
+
     public static ControlMessage openingDataConnection() {
         return ControlMessage.reply(150, "Opening data connection");
     }
@@ -71,5 +72,17 @@ public final class ReplyFactory {
 
     public static ControlMessage localError() {
         return ControlMessage.reply(451, "Local error");
+    }
+
+    public static ControlMessage pathCreated(String path) {
+        return ControlMessage.reply(257, "\"" + path + "\"");
+    }
+
+    public static ControlMessage directoryChanged() {
+        return ControlMessage.reply(250, "Directory changed");
+    }
+
+    public static ControlMessage directoryRemoved() {
+        return ControlMessage.reply(250, "Directory removed");
     }
 }

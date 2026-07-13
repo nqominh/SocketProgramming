@@ -10,13 +10,13 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
-public final class DatagramPacketEndpoint implements PacketEndpoint {
+public final class DatagramPacketChannel implements PacketChannel {
     private static final int MAX_DATAGRAM_BYTES = ReliableDataPacket.HEADER_BYTES + ReliableDataPacket.MAX_PAYLOAD_BYTES;
 
     private final DatagramSocket socket;
     private final InetSocketAddress peer;
 
-    public DatagramPacketEndpoint(DatagramSocket socket, InetSocketAddress peer) {
+    public DatagramPacketChannel(DatagramSocket socket, InetSocketAddress peer) {
         this.socket = Objects.requireNonNull(socket, "socket");
         this.peer = Objects.requireNonNull(peer, "peer");
     }

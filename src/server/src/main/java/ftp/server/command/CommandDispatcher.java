@@ -30,14 +30,19 @@ public final class CommandDispatcher {
 
     public CommandDispatcher(DataChannelService dataChannelService) {
         this.dataChannelService = dataChannelService;
-        handlers = Map.of(
-                "USER", this::handleUser,
-                "PASS", this::handlePass,
-                "NOOP", (session, command) -> CommandResult.single(ReplyFactory.ok()),
-                "QUIT", (session, command) -> CommandResult.closing(ReplyFactory.goodbye()),
-                "PASV", this::handlePassive,
-                "STOR", this::handleStor,
-                "RETR", this::handleRetr);
+        handlers = Map.ofEntries(
+                Map.entry("USER", this::handleUser),
+                Map.entry("PASS", this::handlePass),
+                Map.entry("NOOP", (session, command) -> CommandResult.single(ReplyFactory.ok())),
+                Map.entry("QUIT", (session, command) -> CommandResult.closing(ReplyFactory.goodbye())),
+                Map.entry("PWD", this::handlePwd),
+                Map.entry("CWD", this::handleCwd),
+                Map.entry("CDUP", this::handleCdup),
+                Map.entry("MKD", this::handleMkd),
+                Map.entry("RMD", this::handleRmd),
+                Map.entry("PASV", this::handlePassive),
+                Map.entry("STOR", this::handleStor),
+                Map.entry("RETR", this::handleRetr));
     }
 
     public CommandResult dispatch(ClientSession session, ControlMessage command) {
@@ -65,6 +70,71 @@ public final class CommandDispatcher {
         }
         session.markAuthenticated();
         return CommandResult.single(ReplyFactory.loggedIn());
+    }
+
+    private CommandResult handlePwd(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        return CommandResult.single(ReplyFactory.pathCreated(session.currentDirectory()));
+    }
+
+    private CommandResult handleCwd(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            session.changeDirectory(command.argument());
+            return CommandResult.single(ReplyFactory.directoryChanged());
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleCdup(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            session.changeDirectory("..");
+            return CommandResult.single(ReplyFactory.directoryChanged());
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleMkd(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            Path directory = session.resolvePath(command.argument());
+            Files.createDirectory(directory);
+            return CommandResult.single(ReplyFactory.pathCreated(command.argument()));
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleRmd(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            Path directory = session.resolvePath(command.argument());
+            if (!Files.isDirectory(directory)) {
+                return CommandResult.single(ReplyFactory.fileUnavailable());
+            }
+            Files.delete(directory);
+            return CommandResult.single(ReplyFactory.directoryRemoved());
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
     }
 
     private CommandResult handlePassive(ClientSession session, ControlMessage command) {

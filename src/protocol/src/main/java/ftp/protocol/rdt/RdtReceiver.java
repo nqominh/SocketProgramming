@@ -12,13 +12,13 @@ public final class RdtReceiver {
         this.config = config;
     }
 
-    public byte[] receiveBytes(PacketEndpoint endpoint) throws IOException {
+    public byte[] receiveBytes(PacketChannel endpoint) throws IOException {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         receive(endpoint, outputStream);
         return outputStream.toByteArray();
     }
 
-    public void receive(PacketEndpoint endpoint, OutputStream outputStream) throws IOException {
+    public void receive(PacketChannel endpoint, OutputStream outputStream) throws IOException {
         int expectedSequence = 0;
         int timeoutCount = 0;
         while (true) {

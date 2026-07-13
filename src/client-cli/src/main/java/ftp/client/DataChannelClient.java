@@ -1,7 +1,7 @@
 package ftp.client;
 
 import ftp.protocol.control.ControlMessage;
-import ftp.protocol.rdt.DatagramPacketEndpoint;
+import ftp.protocol.rdt.DatagramPacketChannel;
 import ftp.protocol.rdt.RdtConfig;
 import ftp.protocol.rdt.RdtReceiver;
 import ftp.protocol.rdt.RdtSender;
@@ -18,10 +18,10 @@ public final class DataChannelClient implements AutoCloseable {
     private static final Pattern PASV_REPLY = Pattern.compile(".*\\((\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)\\).*");
     private static final byte[] READY_DATAGRAM = new byte[] {0};
 
-    private final DatagramPacketEndpoint endpoint;
+    private final DatagramPacketChannel endpoint;
     private final RdtConfig config;
 
-    private DataChannelClient(DatagramPacketEndpoint endpoint, RdtConfig config) {
+    private DataChannelClient(DatagramPacketChannel endpoint, RdtConfig config) {
         this.endpoint = endpoint;
         this.config = config;
     }
@@ -42,7 +42,7 @@ public final class DataChannelClient implements AutoCloseable {
         DatagramSocket socket = new DatagramSocket();
         socket.setSoTimeout(Math.toIntExact(timeout.toMillis()));
         InetSocketAddress peer = new InetSocketAddress(InetAddress.getByAddress(address), port);
-        return new DataChannelClient(new DatagramPacketEndpoint(socket, peer), RdtConfig.defaults());
+        return new DataChannelClient(new DatagramPacketChannel(socket, peer), RdtConfig.defaults());
     }
 
     public void upload(byte[] payload) throws IOException {

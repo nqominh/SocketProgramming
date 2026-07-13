@@ -12,12 +12,12 @@ public final class RdtSender {
         this.config = config;
     }
 
-    public void send(byte[] payload, PacketEndpoint endpoint) throws IOException {
+    public void send(byte[] payload, PacketChannel endpoint) throws IOException {
         byte[] bytes = payload == null ? new byte[0] : payload;
         send(new java.io.ByteArrayInputStream(bytes), endpoint);
     }
 
-    public void send(InputStream inputStream, PacketEndpoint endpoint) throws IOException {
+    public void send(InputStream inputStream, PacketChannel endpoint) throws IOException {
         byte[] buffer = new byte[config.maxPayloadBytes()];
         int sequenceNumber = 0;
         int read = inputStream.read(buffer);
@@ -34,7 +34,7 @@ public final class RdtSender {
         }
     }
 
-    private void sendWithRetry(ReliableDataPacket packet, PacketEndpoint endpoint) throws IOException {
+    private void sendWithRetry(ReliableDataPacket packet, PacketChannel endpoint) throws IOException {
         byte[] datagram = packet.encode();
         for (int attempt = 1; attempt <= config.maxRetries(); attempt++) {
             endpoint.send(datagram);

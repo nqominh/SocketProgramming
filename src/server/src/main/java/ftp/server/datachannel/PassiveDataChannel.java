@@ -1,6 +1,6 @@
 package ftp.server.datachannel;
 
-import ftp.protocol.rdt.PacketEndpoint;
+import ftp.protocol.rdt.PacketChannel;
 import ftp.protocol.rdt.ReliableDataPacket;
 
 import java.io.IOException;
@@ -15,7 +15,7 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
-public final class PassiveDataChannel implements PacketEndpoint {
+public final class PassiveDataChannel implements PacketChannel {
     private static final int MAX_DATAGRAM_BYTES = ReliableDataPacket.HEADER_BYTES + ReliableDataPacket.MAX_PAYLOAD_BYTES;
 
     private final DatagramSocket socket;

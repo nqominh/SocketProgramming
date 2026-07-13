@@ -1,6 +1,6 @@
 package ftp.protocol.unit;
 
-import ftp.protocol.rdt.PacketEndpoint;
+import ftp.protocol.rdt.PacketChannel;
 import ftp.protocol.rdt.RdtConfig;
 import ftp.protocol.rdt.RdtReceiver;
 import ftp.protocol.rdt.RdtSender;
@@ -57,16 +57,16 @@ final class RdtLoopbackTest {
             return new InMemoryLink(FaultPlan.controlledFaults());
         }
 
-        PacketEndpoint sender() {
+        PacketChannel sender() {
             return sender;
         }
 
-        PacketEndpoint receiver() {
+        PacketChannel receiver() {
             return receiver;
         }
     }
 
-    static final class LinkEndpoint implements PacketEndpoint {
+    static final class LinkEndpoint implements PacketChannel {
         private final BlockingQueue<byte[]> inbound;
         private final BlockingQueue<byte[]> peerInbound;
         private final FaultPlan faultPlan;
