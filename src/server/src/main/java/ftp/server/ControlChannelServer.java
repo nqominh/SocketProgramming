@@ -53,20 +53,31 @@ public final class ControlChannelServer implements AutoCloseable {
 
     private void acceptLoop() {
         while (running.get()) {
+            java.net.Socket socket;
             try {
-                handleClient(serverSocket.accept());
+                socket = serverSocket.accept();
             } catch (java.net.SocketTimeoutException ignored) {
-                // Poll running flag.
+                continue;
             } catch (IOException exception) {
                 if (running.get()) {
                     throw new IllegalStateException("Control server accept failed", exception);
                 }
+                return;
+            }
+            try {
+                handleClient(socket);
+            } catch (IOException exception) {
+                logClientFailure(socket, exception);
             }
         }
     }
 
     private void handleClient(java.net.Socket socket) throws IOException {
         new ControlConnectionHandler(socket, root, nextSessionId(), commandDispatcher).handle();
+    }
+
+    private static void logClientFailure(java.net.Socket socket, IOException exception) {
+        System.err.printf("Connection from %s failed: %s%n", socket.getRemoteSocketAddress(), exception.getMessage());
     }
 
     private String nextSessionId() {

@@ -74,6 +74,28 @@ final class ControlChannelSmokeTest {
     }
 
     @Test
+    void abruptClientDisconnectDoesNotKillAcceptLoop() throws Exception {
+        try (ControlChannelServer server = ControlChannelServer.bind(InetAddress.getLoopbackAddress(), 0, root)) {
+            server.start();
+
+            try (Socket rude = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
+                assertEquals(220, readReplyCode(rude));
+                rude.setSoLinger(true, 0);
+            } // closing with linger=0 sends RST, so the server's blocking readLine() fails mid-loop
+
+            Thread.sleep(200); // let the accept-loop thread observe and (mis)handle the reset
+
+            try (ControlChannelClient client = ControlChannelClient.connect(
+                    InetAddress.getLoopbackAddress().getHostAddress(),
+                    server.port(),
+                    Duration.ofSeconds(2))) {
+                assertEquals(220, client.readReply().replyCode(),
+                        "accept loop should still serve new clients after one client's abrupt disconnect");
+            }
+        }
+    }
+
+    @Test
     void malformedCommandReturnsSyntaxErrorWithoutClosingServer() throws Exception {
         try (ControlChannelServer server = ControlChannelServer.bind(InetAddress.getLoopbackAddress(), 0, root)) {
             server.start();

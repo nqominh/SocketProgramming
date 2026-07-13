@@ -13,6 +13,8 @@ import java.time.Duration;
 import java.util.Locale;
 
 public final class Cli {
+    private static final Duration TRANSFER_JOIN_TIMEOUT = Duration.ofSeconds(2);
+
     private Cli() {
     }
 
@@ -27,27 +29,27 @@ public final class Cli {
         String host = option(args, "--host", "127.0.0.1");
         int port = Integer.parseInt(option(args, "--port", "2121"));
         try (ControlChannelClient client = ControlChannelClient.connect(host, port, Duration.ofSeconds(3));
-             BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             printReply(output, client.readReply());
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) {
                     continue;
                 }
-                String[] parts = line.trim().split("\\s+");
-                String command = parts[0].toLowerCase(Locale.ROOT);
+                String[] commandTokens = line.trim().split("\\s+");
+                String command = commandTokens[0].toLowerCase(Locale.ROOT);
                 switch (command) {
-                    case "user" -> sendAndPrint(client, output, "USER", argument(parts, 1));
-                    case "pass" -> sendAndPrint(client, output, "PASS", argument(parts, 1));
+                    case "user" -> sendAndPrint(client, output, "USER", argument(commandTokens, 1));
+                    case "pass" -> sendAndPrint(client, output, "PASS", argument(commandTokens, 1));
                     case "noop" -> sendAndPrint(client, output, "NOOP", "");
-                    case "stor" -> store(client, output, parts);
-                    case "retr" -> retrieve(client, output, parts);
+                    case "stor" -> store(client, output, commandTokens);
+                    case "retr" -> retrieve(client, output, commandTokens);
                     case "quit" -> {
                         sendAndPrint(client, output, "QUIT", "");
                         return 0;
                     }
                     default -> {
-                        output.printf("Unknown local command: %s%n", parts[0]);
+                        output.printf("Unknown local command: %s%n", commandTokens[0]);
                         return 1;
                     }
                 }
@@ -56,15 +58,17 @@ public final class Cli {
         }
     }
 
-    private static void store(ControlChannelClient client, PrintStream output, String[] parts) throws Exception {
-        if (parts.length != 3) {
+    private static void store(ControlChannelClient client, PrintStream output, String[] commandTokens) throws Exception {
+        if (commandTokens.length != 3) {
             throw new IllegalArgumentException("stor requires local and remote paths");
         }
         DataChannelClient data = openPassive(client, output);
-        client.sendCommand("STOR", parts[2]);
-        data.upload(Files.readAllBytes(Path.of(parts[1])));
-        printReply(output, client.readReply());
-        printReply(output, client.readReply());
+        client.sendCommand("STOR", commandTokens[2]);
+        Path localSource = Path.of(commandTokens[1]);
+        runDataChannelTransfer(client, output, data, () -> {
+            data.upload(Files.readAllBytes(localSource));
+            return null;
+        });
     }
 
     private static void retrieve(ControlChannelClient client, PrintStream output, String[] parts) throws Exception {
@@ -73,10 +77,58 @@ public final class Cli {
         }
         DataChannelClient data = openPassive(client, output);
         client.sendCommand("RETR", parts[1]);
-        byte[] payload = data.download();
-        printReply(output, client.readReply());
-        printReply(output, client.readReply());
-        Files.write(Path.of(parts[2]), payload);
+        TransferOutcome outcome = runDataChannelTransfer(client, output, data, data::download);
+        if (outcome.success) {
+            Files.write(Path.of(parts[2]), outcome.downloaded);
+        }
+    }
+
+    /**
+     * The server runs STOR/RETR synchronously inside its command dispatch and only
+     * writes control replies afterward: on success it sends two lines (150 then 226)
+     * once the whole transfer is done; on early failure (auth, missing file, no data
+     * connection) it sends exactly one line and never touches the data channel. So the
+     * data-channel operation must already be running before we know which shape to
+     * expect, and reply-reading must stay in step with the reply count that actually
+     * shows up rather than a fixed count of two.
+     */
+    private static TransferOutcome runDataChannelTransfer(
+            ControlChannelClient client, 
+            PrintStream output, 
+            DataChannelClient data, 
+            DataChannelTask task)
+            throws Exception {
+        TransferOutcome outcome = new TransferOutcome();
+        Thread worker = new Thread(() -> {
+            try {
+                outcome.downloaded = task.run();
+                outcome.success = true;
+            } catch (Exception exception) {
+                outcome.failure = exception;
+            }
+        });
+        worker.setDaemon(true);
+        worker.start();
+
+        ControlMessage firstReply = client.readReply();
+        printReply(output, firstReply);
+
+        if (firstReply.replyCode() == 150) {
+            printReply(output, client.readReply());
+            worker.join(TRANSFER_JOIN_TIMEOUT.toMillis());
+            if (worker.isAlive()) {
+                output.println("Data transfer did not complete in time.");
+                outcome.success = false;
+            } else if (outcome.failure != null) {
+                output.printf("Data transfer failed: %s%n", outcome.failure.getMessage());
+            }
+        } else {
+            // Single-reply failure: the server never touched the data channel, so don't
+            // wait out the RDT timeout for data that is never coming.
+            data.close();
+            worker.join(TRANSFER_JOIN_TIMEOUT.toMillis());
+        }
+        return outcome;
     }
 
     private static DataChannelClient openPassive(ControlChannelClient client, PrintStream output) throws Exception {
@@ -110,5 +162,16 @@ public final class Cli {
             }
         }
         return defaultValue;
+    }
+
+    @FunctionalInterface
+    private interface DataChannelTask {
+        byte[] run() throws Exception;
+    }
+
+    private static final class TransferOutcome {
+        private volatile boolean success;
+        private volatile byte[] downloaded;
+        private volatile Exception failure;
     }
 }
