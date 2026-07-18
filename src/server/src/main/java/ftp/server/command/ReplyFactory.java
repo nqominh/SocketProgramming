@@ -30,6 +30,10 @@ public final class ReplyFactory {
         return ControlMessage.reply(504, "Unsupported parameter");
     }
 
+    public static ControlMessage invalidParameter() {
+        return ControlMessage.reply(501, "Invalid parameter");
+    }
+
     public static ControlMessage usernameRequired() {
         return ControlMessage.reply(501, "Username required");
     }

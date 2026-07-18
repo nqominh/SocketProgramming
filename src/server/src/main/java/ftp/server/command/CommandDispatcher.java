@@ -1,20 +1,26 @@
 package ftp.server.command;
 
 import ftp.protocol.control.ControlMessage;
+import ftp.protocol.rdt.PacketChannel;
 import ftp.protocol.rdt.RdtConfig;
 import ftp.protocol.rdt.RdtReceiver;
 import ftp.protocol.rdt.RdtSender;
 import ftp.server.ClientSession;
+import ftp.server.datachannel.ActiveDataChannel;
 import ftp.server.datachannel.DataChannelService;
 import ftp.server.datachannel.PassiveDataChannel;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -27,6 +33,11 @@ import java.util.concurrent.TimeoutException;
 public final class CommandDispatcher {
     private static final DateTimeFormatter MDTM_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMddHHmmss").withZone(ZoneOffset.UTC);
+    private static final RdtConfig ACTIVE_RDT_CONFIG = new RdtConfig(
+            RdtConfig.DEFAULT_MAX_PAYLOAD_BYTES,
+            Duration.ofMillis(100),
+            8,
+            5);
 
     private final DataChannelService dataChannelService;
     private final Map<String, CommandHandler> handlers;
@@ -55,6 +66,7 @@ public final class CommandDispatcher {
                 Map.entry("STAT", this::handleStat),
                 Map.entry("TYPE", this::handleType),
                 Map.entry("MODE", this::handleMode),
+                Map.entry("PORT", this::handlePort),
                 Map.entry("PASV", this::handlePassive),
                 Map.entry("STOR", this::handleStor),
                 Map.entry("RETR", this::handleRetr));
@@ -285,6 +297,46 @@ public final class CommandDispatcher {
         }
         return CommandResult.single(ReplyFactory.unsupportedParameter());
     }
+
+    private CommandResult handlePort(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            session.replaceActiveDataEndpoint(parsePortEndpoint(command.argument()));
+            return CommandResult.single(ReplyFactory.ok());
+        } catch (IllegalArgumentException | IOException exception) {
+            return CommandResult.single(ReplyFactory.invalidParameter());
+        }
+    }
+
+    private static InetSocketAddress parsePortEndpoint(String argument) throws IOException {
+        String[] parts = argument.split(",");
+        if (parts.length != 6) {
+            throw new IllegalArgumentException("PORT requires h1,h2,h3,h4,p1,p2");
+        }
+        byte[] address = new byte[4];
+        for (int index = 0; index < address.length; index++) {
+            address[index] = (byte) parsePortByte(parts[index]);
+        }
+        int high = parsePortByte(parts[4]);
+        int low = parsePortByte(parts[5]);
+        int port = (high * 256) + low;
+        if (port == 0) {
+            throw new IllegalArgumentException("PORT cannot target UDP port 0");
+        }
+        return new InetSocketAddress(InetAddress.getByAddress(address), port);
+    }
+
+    private static int parsePortByte(String value) {
+        int parsed = Integer.parseInt(value.trim());
+        if (parsed < 0 || parsed > 255) {
+            throw new IllegalArgumentException("PORT byte out of range: " + value);
+        }
+        return parsed;
+    }
+
     private CommandResult handlePassive(ClientSession session, ControlMessage command) {
         if (session.authState() != ClientSession.AuthState.AUTHENTICATED) {
             return CommandResult.single(ReplyFactory.notLoggedIn());
@@ -302,27 +354,39 @@ public final class CommandDispatcher {
         if (authFailure != null) {
             return authFailure;
         }
-        PassiveDataChannel dataChannel = session.takePassiveDataChannel();
+        PacketChannel dataChannel;
+        try {
+            dataChannel = dataChannelService.openSelectedDataChannel(session);
+        } catch (IOException exception) {
+            return CommandResult.single(ReplyFactory.cannotOpenDataConnection());
+        }
         if (dataChannel == null) {
             return CommandResult.single(ReplyFactory.noDataConnection());
         }
-        try (PassiveDataChannel closeableDataChannel = dataChannel) {
+        Path temporaryTarget = null;
+        try (PacketChannel closeableDataChannel = dataChannel) {
+            if (closeableDataChannel instanceof ActiveDataChannel activeDataChannel) {
+                activeDataChannel.signalPeerReady();
+            }
             Path target = session.resolvePath(command.argument());
             Path parent = target.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
+            temporaryTarget = Files.createTempFile(parent, "upload-", ".part");
             try (OutputStream outputStream = Files.newOutputStream(
-                    target,
-                    StandardOpenOption.CREATE,
+                    temporaryTarget,
                     StandardOpenOption.TRUNCATE_EXISTING,
                     StandardOpenOption.WRITE)) {
-                new RdtReceiver(rdtConfig).receive(closeableDataChannel, outputStream);
+                new RdtReceiver(transferConfig(closeableDataChannel)).receive(closeableDataChannel, outputStream);
             }
+            Files.move(temporaryTarget, target, StandardCopyOption.REPLACE_EXISTING);
             return transferComplete();
         } catch (IOException exception) {
+            deleteQuietly(temporaryTarget);
             return CommandResult.single(ReplyFactory.localError());
         } catch (SecurityException exception) {
+            deleteQuietly(temporaryTarget);
             return CommandResult.single(ReplyFactory.fileUnavailable());
         }
     }
@@ -332,18 +396,25 @@ public final class CommandDispatcher {
         if (authFailure != null) {
             return authFailure;
         }
-        PassiveDataChannel dataChannel = session.takePassiveDataChannel();
+        PacketChannel dataChannel;
+        try {
+            dataChannel = dataChannelService.openSelectedDataChannel(session);
+        } catch (IOException exception) {
+            return CommandResult.single(ReplyFactory.cannotOpenDataConnection());
+        }
         if (dataChannel == null) {
             return CommandResult.single(ReplyFactory.noDataConnection());
         }
-        try (PassiveDataChannel closeableDataChannel = dataChannel) {
+        try (PacketChannel closeableDataChannel = dataChannel) {
             Path source = session.resolvePath(command.argument());
             if (!Files.isRegularFile(source)) {
                 return CommandResult.single(ReplyFactory.fileUnavailable());
             }
-            closeableDataChannel.awaitPeer(rdtConfig.ackTimeout());
+            if (closeableDataChannel instanceof PassiveDataChannel passiveDataChannel) {
+                passiveDataChannel.awaitPeer(rdtConfig.ackTimeout());
+            }
             try (InputStream inputStream = Files.newInputStream(source, StandardOpenOption.READ)) {
-                new RdtSender(rdtConfig).send(inputStream, closeableDataChannel);
+                new RdtSender(transferConfig(closeableDataChannel)).send(inputStream, closeableDataChannel);
             }
             return transferComplete();
         } catch (TimeoutException | IOException exception) {
@@ -358,6 +429,21 @@ public final class CommandDispatcher {
             return CommandResult.single(ReplyFactory.notLoggedIn());
         }
         return null;
+    }
+
+    private RdtConfig transferConfig(PacketChannel channel) {
+        return channel instanceof ActiveDataChannel ? ACTIVE_RDT_CONFIG : rdtConfig;
+    }
+
+    private static void deleteQuietly(Path target) {
+        if (target == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(target);
+        } catch (IOException ignored) {
+            // Best-effort cleanup; the transfer already failed and must still return a control reply.
+        }
     }
 
     private static CommandResult transferComplete() {

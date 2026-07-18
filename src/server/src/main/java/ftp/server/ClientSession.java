@@ -4,6 +4,7 @@ import ftp.server.datachannel.PassiveDataChannel;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -32,6 +33,7 @@ public final class ClientSession implements AutoCloseable {
     private TransferMode transferMode = TransferMode.STREAM;
     private AuthState authState = AuthState.UNAUTHENTICATED;
     private String username = "";
+    private InetSocketAddress activeDataEndpoint;
     private PassiveDataChannel passiveDataChannel;
 
     public ClientSession(String sessionId, FileSystemRoot fileSystemRoot) {
@@ -72,6 +74,10 @@ public final class ClientSession implements AutoCloseable {
         return passiveBindAddress;
     }
 
+    public InetSocketAddress activeDataEndpoint() {
+        return activeDataEndpoint;
+    }
+
     public void markUserSent(String username) {
         this.username = Objects.requireNonNull(username, "username");
         authState = AuthState.USER_SENT;
@@ -90,8 +96,24 @@ public final class ClientSession implements AutoCloseable {
     }
 
     public void replacePassiveDataChannel(PassiveDataChannel dataChannel) {
+        clearActiveDataEndpoint();
         closePassiveDataChannel();
         passiveDataChannel = Objects.requireNonNull(dataChannel, "dataChannel");
+    }
+
+    public void replaceActiveDataEndpoint(InetSocketAddress endpoint) {
+        closePassiveDataChannel();
+        activeDataEndpoint = Objects.requireNonNull(endpoint, "endpoint");
+    }
+
+    public InetSocketAddress takeActiveDataEndpoint() {
+        InetSocketAddress endpoint = activeDataEndpoint;
+        activeDataEndpoint = null;
+        return endpoint;
+    }
+
+    public void clearActiveDataEndpoint() {
+        activeDataEndpoint = null;
     }
 
     public PassiveDataChannel takePassiveDataChannel() {
