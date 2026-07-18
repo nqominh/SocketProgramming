@@ -26,6 +26,10 @@ public final class ReplyFactory {
         return ControlMessage.reply(502, "Command not implemented");
     }
 
+    public static ControlMessage unsupportedParameter() {
+        return ControlMessage.reply(504, "Unsupported parameter");
+    }
+
     public static ControlMessage usernameRequired() {
         return ControlMessage.reply(501, "Username required");
     }
@@ -84,5 +88,13 @@ public final class ReplyFactory {
 
     public static ControlMessage directoryRemoved() {
         return ControlMessage.reply(250, "Directory removed");
+    }
+
+    public static ControlMessage listing(String entries) {
+        return ControlMessage.reply(226, entries);
+    }
+
+    public static ControlMessage fileStatus(String status) {
+        return ControlMessage.reply(213, status);
     }
 }

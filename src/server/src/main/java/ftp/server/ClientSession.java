@@ -15,10 +15,21 @@ public final class ClientSession implements AutoCloseable {
         AUTHENTICATED
     }
 
+    public enum TransferType {
+        ASCII,
+        BINARY
+    }
+
+    public enum TransferMode {
+        STREAM
+    }
+
     private final String sessionId;
     private final FileSystemRoot fileSystemRoot;
     private final InetAddress passiveBindAddress;
     private String currentDirectory = "/";
+    private TransferType transferType = TransferType.ASCII;
+    private TransferMode transferMode = TransferMode.STREAM;
     private AuthState authState = AuthState.UNAUTHENTICATED;
     private String username = "";
     private PassiveDataChannel passiveDataChannel;
@@ -41,6 +52,14 @@ public final class ClientSession implements AutoCloseable {
         return currentDirectory;
     }
 
+    public TransferType transferType() {
+        return transferType;
+    }
+
+    public TransferMode transferMode() {
+        return transferMode;
+    }
+
     public AuthState authState() {
         return authState;
     }
@@ -60,6 +79,14 @@ public final class ClientSession implements AutoCloseable {
 
     public void markAuthenticated() {
         authState = AuthState.AUTHENTICATED;
+    }
+
+    public void setTransferType(TransferType transferType) {
+        this.transferType = Objects.requireNonNull(transferType, "transferType");
+    }
+
+    public void setTransferMode(TransferMode transferMode) {
+        this.transferMode = Objects.requireNonNull(transferMode, "transferMode");
     }
 
     public void replacePassiveDataChannel(PassiveDataChannel dataChannel) {

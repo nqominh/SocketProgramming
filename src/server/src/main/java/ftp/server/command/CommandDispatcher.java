@@ -11,15 +11,23 @@ import ftp.server.datachannel.PassiveDataChannel;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 public final class CommandDispatcher {
+    private static final DateTimeFormatter MDTM_FORMAT =
+            DateTimeFormatter.ofPattern("yyyyMMddHHmmss").withZone(ZoneOffset.UTC);
+
     private final DataChannelService dataChannelService;
     private final Map<String, CommandHandler> handlers;
     private final RdtConfig rdtConfig = RdtConfig.defaults();
@@ -40,6 +48,13 @@ public final class CommandDispatcher {
                 Map.entry("CDUP", this::handleCdup),
                 Map.entry("MKD", this::handleMkd),
                 Map.entry("RMD", this::handleRmd),
+                Map.entry("NLST", this::handleNlst),
+                Map.entry("LIST", this::handleList),
+                Map.entry("SIZE", this::handleSize),
+                Map.entry("MDTM", this::handleMdtm),
+                Map.entry("STAT", this::handleStat),
+                Map.entry("TYPE", this::handleType),
+                Map.entry("MODE", this::handleMode),
                 Map.entry("PASV", this::handlePassive),
                 Map.entry("STOR", this::handleStor),
                 Map.entry("RETR", this::handleRetr));
@@ -137,6 +152,139 @@ public final class CommandDispatcher {
         }
     }
 
+    private CommandResult handleNlst(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            List<Path> entries = sortedDirectoryEntries(session, command.argument());
+            List<String> names = new ArrayList<>();
+            for (Path entry : entries) {
+                names.add(entry.getFileName().toString());
+            }
+            return CommandResult.single(ReplyFactory.listing(String.join(";", names)));
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleList(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            List<Path> entries = sortedDirectoryEntries(session, command.argument());
+            List<String> lines = new ArrayList<>();
+            for (Path entry : entries) {
+                lines.add(Files.isDirectory(entry)
+                        ? "d " + entry.getFileName()
+                        : "- " + entry.getFileName() + " " + Files.size(entry));
+            }
+            return CommandResult.single(ReplyFactory.listing(String.join(";", lines)));
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private List<Path> sortedDirectoryEntries(ClientSession session, String argument) throws IOException {
+        Path directory = session.resolvePath(argument);
+        if (!Files.isDirectory(directory)) {
+            throw new IOException("Not a directory: " + argument);
+        }
+        List<Path> entries = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+            for (Path entry : stream) {
+                entries.add(entry);
+            }
+        }
+        entries.sort(Comparator.comparing(entry -> entry.getFileName().toString()));
+        return entries;
+    }
+
+    private CommandResult handleSize(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            Path target = session.resolvePath(command.argument());
+            if (!Files.isRegularFile(target)) {
+                return CommandResult.single(ReplyFactory.fileUnavailable());
+            }
+            return CommandResult.single(ReplyFactory.fileStatus(Long.toString(Files.size(target))));
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleMdtm(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            Path target = session.resolvePath(command.argument());
+            if (!Files.exists(target)) {
+                return CommandResult.single(ReplyFactory.fileUnavailable());
+            }
+            String timestamp = MDTM_FORMAT.format(Files.getLastModifiedTime(target).toInstant());
+            return CommandResult.single(ReplyFactory.fileStatus(timestamp));
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleStat(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            Path target = session.resolvePath(command.argument());
+            if (Files.isDirectory(target)) {
+                return CommandResult.single(ReplyFactory.fileStatus("d " + target.getFileName()));
+            }
+            if (Files.isRegularFile(target)) {
+                return CommandResult.single(
+                        ReplyFactory.fileStatus("- " + target.getFileName() + " " + Files.size(target)));
+            }
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleType(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        String type = command.argument().trim().toUpperCase(Locale.ROOT);
+        if ("A".equals(type)) {
+            session.setTransferType(ClientSession.TransferType.ASCII);
+            return CommandResult.single(ReplyFactory.ok());
+        }
+        if ("I".equals(type)) {
+            session.setTransferType(ClientSession.TransferType.BINARY);
+            return CommandResult.single(ReplyFactory.ok());
+        }
+        return CommandResult.single(ReplyFactory.unsupportedParameter());
+    }
+
+    private CommandResult handleMode(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        String mode = command.argument().trim().toUpperCase(Locale.ROOT);
+        if ("S".equals(mode)) {
+            session.setTransferMode(ClientSession.TransferMode.STREAM);
+            return CommandResult.single(ReplyFactory.ok());
+        }
+        return CommandResult.single(ReplyFactory.unsupportedParameter());
+    }
     private CommandResult handlePassive(ClientSession session, ControlMessage command) {
         if (session.authState() != ClientSession.AuthState.AUTHENTICATED) {
             return CommandResult.single(ReplyFactory.notLoggedIn());
