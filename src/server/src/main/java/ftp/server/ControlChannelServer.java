@@ -16,7 +16,8 @@ public final class ControlChannelServer implements AutoCloseable {
     private final Path root;
     private final CommandDispatcher commandDispatcher = new CommandDispatcher();
     private final AtomicInteger sessionSequence = new AtomicInteger();
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService acceptExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService clientExecutor = Executors.newFixedThreadPool(8);
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private ControlChannelServer(ServerSocket serverSocket, Path root) {
@@ -40,7 +41,7 @@ public final class ControlChannelServer implements AutoCloseable {
 
     public void start() {
         if (running.compareAndSet(false, true)) {
-            executor.submit(this::acceptLoop);
+            acceptExecutor.submit(this::acceptLoop);
         }
     }
 
@@ -48,7 +49,8 @@ public final class ControlChannelServer implements AutoCloseable {
     public void close() throws IOException {
         running.set(false);
         serverSocket.close();
-        executor.shutdownNow();
+        acceptExecutor.shutdownNow();
+        clientExecutor.shutdownNow();
     }
 
     private void acceptLoop() {
@@ -64,10 +66,24 @@ public final class ControlChannelServer implements AutoCloseable {
                 }
                 return;
             }
+            submitClient(socket);
+        }
+    }
+
+    private void submitClient(java.net.Socket socket) {
+        try {
+            clientExecutor.submit(() -> {
+                try {
+                    handleClient(socket);
+                } catch (IOException exception) {
+                    logClientFailure(socket, exception);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException exception) {
             try {
-                handleClient(socket);
-            } catch (IOException exception) {
-                logClientFailure(socket, exception);
+                socket.close();
+            } catch (IOException ignored) {
+                // Server is shutting down; no client reply is possible here.
             }
         }
     }

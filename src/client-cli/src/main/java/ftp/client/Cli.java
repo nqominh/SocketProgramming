@@ -42,6 +42,22 @@ public final class Cli {
                     case "user" -> sendAndPrint(client, output, "USER", argument(commandTokens, 1));
                     case "pass" -> sendAndPrint(client, output, "PASS", argument(commandTokens, 1));
                     case "noop" -> sendAndPrint(client, output, "NOOP", "");
+                    case "pwd" -> sendAndPrint(client, output, "PWD", "");
+                    case "cd" -> sendAndPrint(client, output, "CWD", argument(commandTokens, 1));
+                    case "cdup" -> sendAndPrint(client, output, "CDUP", "");
+                    case "mkdir" -> sendAndPrint(client, output, "MKD", argument(commandTokens, 1));
+                    case "rmdir" -> sendAndPrint(client, output, "RMD", argument(commandTokens, 1));
+                    case "ls" -> sendAndPrint(client, output, "LIST", argument(commandTokens, 1));
+                    case "nlst" -> sendAndPrint(client, output, "NLST", argument(commandTokens, 1));
+                    case "stat" -> sendAndPrint(client, output, "STAT", argument(commandTokens, 1));
+                    case "size" -> sendAndPrint(client, output, "SIZE", argument(commandTokens, 1));
+                    case "mdtm" -> sendAndPrint(client, output, "MDTM", argument(commandTokens, 1));
+                    case "type" -> sendAndPrint(client, output, "TYPE", argument(commandTokens, 1));
+                    case "mode" -> sendAndPrint(client, output, "MODE", argument(commandTokens, 1));
+                    case "pasv" -> sendAndPrint(client, output, "PASV", "");
+                    case "port" -> sendAndPrint(client, output, "PORT", argument(commandTokens, 1));
+                    case "dele" -> sendAndPrint(client, output, "DELE", argument(commandTokens, 1));
+                    case "rename" -> rename(client, output, commandTokens);
                     case "stor" -> store(client, output, commandTokens);
                     case "retr" -> retrieve(client, output, commandTokens);
                     case "quit" -> {
@@ -69,6 +85,19 @@ public final class Cli {
             data.upload(Files.readAllBytes(localSource));
             return null;
         });
+    }
+
+    private static void rename(ControlChannelClient client, PrintStream output, String[] commandTokens) throws Exception {
+        if (commandTokens.length != 3) {
+            throw new IllegalArgumentException("rename requires old and new remote paths");
+        }
+        client.sendCommand("RNFR", commandTokens[1]);
+        ControlMessage rnfr = client.readReply();
+        printReply(output, rnfr);
+        if (rnfr.replyCode() == 350) {
+            client.sendCommand("RNTO", commandTokens[2]);
+            printReply(output, client.readReply());
+        }
     }
 
     private static void retrieve(ControlChannelClient client, PrintStream output, String[] parts) throws Exception {

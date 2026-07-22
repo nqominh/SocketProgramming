@@ -74,6 +74,18 @@ public final class ReplyFactory {
         return ControlMessage.reply(226, "Transfer complete");
     }
 
+    public static ControlMessage fileActionPending() {
+        return ControlMessage.reply(350, "File action pending");
+    }
+
+    public static ControlMessage badCommandSequence() {
+        return ControlMessage.reply(503, "Bad command sequence");
+    }
+
+    public static ControlMessage fileActionCompleted() {
+        return ControlMessage.reply(250, "File action completed");
+    }
+
     public static ControlMessage fileUnavailable() {
         return ControlMessage.reply(550, "File unavailable");
     }

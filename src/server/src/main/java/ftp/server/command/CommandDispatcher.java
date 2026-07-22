@@ -68,6 +68,9 @@ public final class CommandDispatcher {
                 Map.entry("MODE", this::handleMode),
                 Map.entry("PORT", this::handlePort),
                 Map.entry("PASV", this::handlePassive),
+                Map.entry("DELE", this::handleDele),
+                Map.entry("RNFR", this::handleRnfr),
+                Map.entry("RNTO", this::handleRnto),
                 Map.entry("STOR", this::handleStor),
                 Map.entry("RETR", this::handleRetr));
     }
@@ -337,6 +340,58 @@ public final class CommandDispatcher {
         return parsed;
     }
 
+    private CommandResult handleDele(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            Path target = session.resolvePath(command.argument());
+            if (!Files.isRegularFile(target)) {
+                return CommandResult.single(ReplyFactory.fileUnavailable());
+            }
+            Files.delete(target);
+            return CommandResult.single(ReplyFactory.fileActionCompleted());
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleRnfr(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        try {
+            Path source = session.resolvePath(command.argument());
+            if (!Files.isRegularFile(source)) {
+                return CommandResult.single(ReplyFactory.fileUnavailable());
+            }
+            session.rememberRenameFrom(source);
+            return CommandResult.single(ReplyFactory.fileActionPending());
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
+    private CommandResult handleRnto(ClientSession session, ControlMessage command) {
+        CommandResult authFailure = authenticated(session);
+        if (authFailure != null) {
+            return authFailure;
+        }
+        Path source = session.consumePendingRenameFrom();
+        if (source == null) {
+            return CommandResult.single(ReplyFactory.badCommandSequence());
+        }
+        try {
+            Path target = session.resolvePath(command.argument());
+            Files.move(source, target);
+            return CommandResult.single(ReplyFactory.fileActionCompleted());
+        } catch (IOException | SecurityException exception) {
+            return CommandResult.single(ReplyFactory.fileUnavailable());
+        }
+    }
+
     private CommandResult handlePassive(ClientSession session, ControlMessage command) {
         if (session.authState() != ClientSession.AuthState.AUTHENTICATED) {
             return CommandResult.single(ReplyFactory.notLoggedIn());
@@ -363,6 +418,7 @@ public final class CommandDispatcher {
         if (dataChannel == null) {
             return CommandResult.single(ReplyFactory.noDataConnection());
         }
+        boolean activeTransfer = dataChannel instanceof ActiveDataChannel;
         Path temporaryTarget = null;
         try (PacketChannel closeableDataChannel = dataChannel) {
             if (closeableDataChannel instanceof ActiveDataChannel activeDataChannel) {
@@ -383,8 +439,11 @@ public final class CommandDispatcher {
             Files.move(temporaryTarget, target, StandardCopyOption.REPLACE_EXISTING);
             return transferComplete();
         } catch (IOException exception) {
+            boolean noUploadBytes = uploadHasNoBytes(temporaryTarget);
             deleteQuietly(temporaryTarget);
-            return CommandResult.single(ReplyFactory.localError());
+            return CommandResult.single(activeTransfer && noUploadBytes
+                    ? ReplyFactory.cannotOpenDataConnection()
+                    : ReplyFactory.localError());
         } catch (SecurityException exception) {
             deleteQuietly(temporaryTarget);
             return CommandResult.single(ReplyFactory.fileUnavailable());
@@ -429,6 +488,17 @@ public final class CommandDispatcher {
             return CommandResult.single(ReplyFactory.notLoggedIn());
         }
         return null;
+    }
+
+private static boolean uploadHasNoBytes(Path temporaryTarget) {
+        if (temporaryTarget == null) {
+            return true;
+        }
+        try {
+            return Files.size(temporaryTarget) == 0;
+        } catch (IOException exception) {
+            return false;
+        }
     }
 
     private RdtConfig transferConfig(PacketChannel channel) {

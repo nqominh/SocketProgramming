@@ -35,6 +35,7 @@ public final class ClientSession implements AutoCloseable {
     private String username = "";
     private InetSocketAddress activeDataEndpoint;
     private PassiveDataChannel passiveDataChannel;
+    private Path pendingRenameFrom;
 
     public ClientSession(String sessionId, FileSystemRoot fileSystemRoot) {
         this(sessionId, fileSystemRoot, InetAddress.getLoopbackAddress());
@@ -114,6 +115,16 @@ public final class ClientSession implements AutoCloseable {
 
     public void clearActiveDataEndpoint() {
         activeDataEndpoint = null;
+    }
+
+    public void rememberRenameFrom(Path source) {
+        pendingRenameFrom = Objects.requireNonNull(source, "source");
+    }
+
+    public Path consumePendingRenameFrom() {
+        Path source = pendingRenameFrom;
+        pendingRenameFrom = null;
+        return source;
     }
 
     public PassiveDataChannel takePassiveDataChannel() {

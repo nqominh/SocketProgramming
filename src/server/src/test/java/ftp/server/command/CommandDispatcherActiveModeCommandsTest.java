@@ -9,10 +9,14 @@ import org.junit.jupiter.api.io.TempDir;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.fail;
 
 final class CommandDispatcherActiveModeCommandsTest {
@@ -59,6 +63,34 @@ final class CommandDispatcherActiveModeCommandsTest {
             // PASV replaces stale active endpoint state with a passive listener.
             assertEquals(227, passive.primaryReply().replyCode());
             assertNull(activeDataEndpoint(session));
+        }
+    }
+
+    @Test
+    void storToUnreachableActiveEndpointReturnsDataConnectionError() throws Exception {
+        ClientSession session = authenticatedSession();
+        CommandDispatcher dispatcher = new CommandDispatcher();
+        assertEquals(200, dispatch(dispatcher, session, "PORT", "127,0,0,1,195,82").primaryReply().replyCode());
+
+        CommandResult result = assertTimeoutPreemptively(
+                Duration.ofSeconds(2),
+                () -> dispatch(dispatcher, session, "STOR", "missing-client.txt"));
+
+        assertEquals(425, result.primaryReply().replyCode());
+    }
+
+    @Test
+    void failedActiveStorDoesNotCommitPartialUploadFile() throws Exception {
+        ClientSession session = authenticatedSession();
+        CommandDispatcher dispatcher = new CommandDispatcher();
+        assertEquals(200, dispatch(dispatcher, session, "PORT", "127,0,0,1,195,83").primaryReply().replyCode());
+
+        CommandResult result = dispatch(dispatcher, session, "STOR", "partial.txt");
+
+        assertEquals(425, result.primaryReply().replyCode());
+        assertFalse(Files.exists(rootPath.resolve("partial.txt")));
+        try (var entries = Files.list(rootPath)) {
+            assertFalse(entries.anyMatch(path -> path.getFileName().toString().endsWith(".part")));
         }
     }
 
